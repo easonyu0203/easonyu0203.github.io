@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="NashPG is a practical policy-gradient method with iteratively refined regularization for finding Nash equilibria.">
+  <title>NashPG</title>
+  <link href="https://fonts.googleapis.com/css2?family=Source+Sans+Pro:wght@200;300;400;600;700&amp;display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="site-header">
+    <nav class="nav container" aria-label="Project navigation">
+      <a href="../../">Eason Yu</a>
+      <a href="https://arxiv.org/abs/2510.18183">Paper</a>
+      <a href="https://github.com/ntu-agents/nashpg">Code</a>
+    </nav>
+  </header>
+
+  <main class="container">
+    <section class="project-header section">
+      <h1>NashPG</h1>
+      <p class="project-subtitle">A Policy Gradient Method with Iteratively Refined Regularization for Finding Nash Equilibria</p>
+      <p class="authors"><strong>Eason Yu</strong>, Tzu Hao Liu, Clément L. Canonne, Yunke Wang, Chang Xu, Nguyen H. Tran, Stefano V. Albrecht</p>
+      <p class="venue">Transactions on Machine Learning Research (TMLR), 2026</p>
+      <p class="project-links">
+        <a href="https://arxiv.org/abs/2510.18183">Paper</a>
+        <a href="https://github.com/ntu-agents/nashpg">Code</a>
+        <a href="https://openreview.net/forum?id=yIA2Fjs1FK">OpenReview</a>
+        <a href="#citation">BibTeX</a>
+      </p>
+    </section>
+
+    <section class="section intro">
+      <figure class="teaser">
+        <img src="assets/policy-evolution.gif" alt="A policy trajectory and its moving magnet approaching the Nash equilibrium in rock-paper-scissors">
+        <figcaption>The policy and its moving magnet approaching the Nash equilibrium.</figcaption>
+      </figure>
+      <div>
+        <h2>What is NashPG?</h2>
+        <p>
+          NashPG is a simple way to train one policy per player toward a Nash equilibrium. It is essentially Independent PPO with one addition: a KL regularization term toward a reference policy—a <em>magnet</em>—that is periodically updated.
+        </p>
+        <p>
+          Each player still trains independently. There is no growing population of agents and no separate policy-extraction stage.
+        </p>
+      </div>
+    </section>
+
+    <section class="section text-section">
+      <h2>Why did we build it?</h2>
+      <p>
+        The most commonly used prior approaches are population based. They require training many agents, and their convergence guarantee applies to the average of the population rather than to a single policy. This increases the training cost and requires additional machinery to extract or deploy the average policy.
+      </p>
+      <p>
+        Single-policy algorithms do exist, but they often use specialized optimization schemes, and their empirical performance has been mixed across papers. I wanted a simple single-policy algorithm that just works and stays close to the tools we already use in single-agent reinforcement learning.
+      </p>
+    </section>
+
+    <section class="section text-section">
+      <h2>The idea</h2>
+      <p>NashPG makes a small change to Independent PPO:</p>
+      <ol>
+        <li>Each player independently updates its policy with PPO.</li>
+        <li>A KL penalty pulls the policy toward its current magnet.</li>
+        <li>After several updates, the magnet moves to the new policy.</li>
+      </ol>
+      <p>
+        Then we repeat. In our JAX implementation, this differs from Independent PPO by about 20 lines of code.
+      </p>
+    </section>
+
+    <section class="section text-section" id="theory">
+      <h2>Does the moving magnet converge?</h2>
+      <p>
+        At the exact mixed-strategy level, we study this procedure as Iterative MMD (IMMD). The informal result is:
+      </p>
+      <blockquote>
+        Unless the policy is already at a Nash equilibrium, every exact refinement step strictly reduces its Bregman divergence to a Nash equilibrium. Repeating the refinement converges to a Nash equilibrium.
+      </blockquote>
+      <p class="equation">B<sub>ψ</sub>(z<sup>★</sup>; z<sub>t+1</sub>) &lt; B<sub>ψ</sub>(z<sup>★</sup>; z<sub>t</sub>)</p>
+      <p class="note">
+        The theorem is for IMMD in two-player zero-sum extensive-form games under the assumptions in the paper. NashPG is the practical policy-gradient approximation inspired by this result.
+      </p>
+    </section>
+
+    <section class="section" id="results">
+      <h2>How does it perform?</h2>
+      <p class="text-width">
+        Surprisingly, pretty well. We test NashPG on seven imperfect-information games, ranging from Kuhn Poker with 12 information states to Battleship with at least 2.9 × 10<sup>35</sup>. NashPG remains stable, reaches low exploitability on the exact benchmarks, and scales to games where exact evaluation is no longer tractable.
+      </p>
+
+      <figure class="result-figure">
+        <a href="assets/large-games.webp" aria-label="Open the large-games figure at full size">
+          <img src="assets/large-games.webp" alt="Approximate exploitability curves for NashPG and four baselines on Liar's Dice, Heads-Up No-Limit Hold'em, and Battleship">
+        </a>
+        <figcaption>
+          Approximate exploitability on the three large games. Lower is better. <a href="assets/large-games.webp">Full-size figure</a>.
+        </figcaption>
+      </figure>
+
+      <div class="text-section result-copy">
+        <h3>Head-to-head results</h3>
+        <p>
+          NashPG achieves positive average payoff against PSRO and R-NaD across all three large games. These are meaningful baselines: population-based training were central to <a href="https://deepmind.google/blog/alphastar-mastering-the-real-time-strategy-game-starcraft-ii/">AlphaStar</a>, while R-NaD is the learning method behind <a href="https://deepmind.google/blog/mastering-stratego-the-classic-game-of-imperfect-information/">DeepNash</a>. We are particularly proud that such a small algorithmic change performs this well.
+        </p>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <caption>NashPG average payoff, mean ± standard deviation. Positive favors NashPG.</caption>
+          <thead>
+            <tr><th>Game</th><th>vs PSRO</th><th>vs R-NaD</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Liar’s Dice</td><td>+.153 ± .046</td><td>+.163 ± .041</td></tr>
+            <tr><td>Heads-Up NLHE</td><td>+.149 ± .015</td><td>+.104 ± .064</td></tr>
+            <tr><td>Battleship</td><td>+.092 ± .008</td><td>+.107 ± .008</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <details>
+        <summary>Exact-exploitability results on the smaller games</summary>
+        <figure class="result-figure">
+          <a href="assets/exact-benchmarks.webp" aria-label="Open the exact-benchmark figure at full size">
+            <img src="assets/exact-benchmarks.webp" alt="Exact exploitability curves for NashPG and four baselines on Kuhn Poker, Leduc Poker, Abrupt Dark Hex, and Abrupt Phantom Tic-Tac-Toe">
+          </a>
+          <figcaption>Exact exploitability on four smaller benchmark games. Lower is better.</figcaption>
+        </figure>
+      </details>
+    </section>
+
+    <section class="section text-section" id="citation">
+      <h2>Citation</h2>
+      <pre><code>@article{yu2026nashpg,
+  title   = {NashPG: A Policy Gradient Method with Iteratively Refined
+             Regularization for Finding Nash Equilibria},
+  author  = {Yu, Eason and Liu, Tzu Hao and Canonne, Cl\'ement L. and
+             Wang, Yunke and Xu, Chang and Tran, Nguyen H. and
+             Albrecht, Stefano V.},
+  journal = {Transactions on Machine Learning Research},
+  year    = {2026},
+  url     = {https://openreview.net/forum?id=yIA2Fjs1FK}
+}</code></pre>
+    </section>
+  </main>
+
+  <footer class="footer container">
+    <p><a href="../../">Eason Yu</a> · Nanyang Technological University, Singapore</p>
+  </footer>
+</body>
+</html>
