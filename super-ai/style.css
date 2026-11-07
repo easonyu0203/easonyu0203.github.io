@@ -1,0 +1,120 @@
+:root {
+  color-scheme: light dark;
+  --bg: #f5f4f0;
+  --text: #55544f;
+  --muted: #6f6e68;
+  --board: #e7e5de;
+  --hole: #f5f4f0;
+  --seat0: #bd7561;
+  --seat1: #5a8796;
+  --draw: #b4b2a8;
+  --button: #e7e5de;
+  --button-hover: #dcdad2;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1f2022;
+    --text: #c9c7c0;
+    --muted: #9c9b94;
+    --board: #2b2c2f;
+    --hole: #1f2022;
+    --seat0: #c07a65;
+    --seat1: #5f92a4;
+    --draw: #5a5b58;
+    --button: #303135;
+    --button-hover: #3a3b40;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 400 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+main { max-width: 440px; margin: 0 auto; padding: 32px 16px 40px; }
+h1 { margin: 0 0 24px; font-size: 1rem; font-weight: 500; text-align: center; }
+nav { display: flex; flex-wrap: wrap; justify-content: center; gap: 16px; margin: -12px 0 24px; }
+nav a { color: var(--muted); text-decoration: none; }
+nav a[aria-current="page"] { color: var(--text); }
+.board {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  background: var(--board);
+  border-radius: 14px;
+  overflow: hidden;
+  touch-action: manipulation;
+}
+.board[hidden] { display: none; }
+.cell {
+  appearance: none;
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--hole);
+}
+.cell:not(:disabled) { cursor: pointer; }
+.board[data-hover] .cell.landing { opacity: 0.4; }
+.cell:focus-visible { outline: 2px solid var(--muted); outline-offset: 1px; }
+.cell.seat0 { background: var(--seat0); }
+.cell.seat1 { background: var(--seat1); }
+.cell.last { box-shadow: inset 0 0 0 2px var(--hole); }
+.board.over .cell:not(.won) { opacity: 0.45; }
+.cell.dropped { animation: drop 0.28s cubic-bezier(0.4, 0, 1, 1); }
+@keyframes drop { from { transform: translateY(var(--from, -300%)); } to { transform: none; } }
+@media (prefers-reduced-motion: reduce) { .cell.dropped { animation: none; } }
+#status { min-height: 1.5em; margin: 20px 0 8px; text-align: center; }
+.actions { min-height: 40px; margin: 0 0 16px; text-align: center; }
+.actions button {
+  min-height: 40px;
+  padding: 8px 20px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--button);
+  color: var(--text);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+.actions button:hover { background: var(--button-hover); }
+.actions button:focus-visible { outline: 2px solid var(--muted); outline-offset: 2px; }
+
+/* The AI's probabilities: bars under the board's columns. */
+figure { margin: 10px 0 0; }
+figure[hidden] { display: none; }
+.bars {
+  display: grid;
+  grid-template-columns: repeat(var(--columns), 1fr);
+  gap: 6px;
+  height: 60px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--board);
+}
+.column { position: relative; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; min-width: 0; }
+.column b { color: var(--muted); font-size: 0.6875rem; font-weight: 400; font-variant-numeric: tabular-nums; }
+.column.chosen b { color: var(--text); font-weight: 500; }
+.column i { display: block; width: min(100%, 24px); margin-top: 2px; border-radius: 4px 4px 0 0; background: var(--draw); }
+.column.chosen i { background: var(--seat1); }
+figcaption { margin-top: 6px; color: var(--muted); font-size: 0.8125rem; text-align: center; }
+
+/* The win rates. */
+#record { margin-top: 24px; }
+#record[hidden] { display: none; }
+h2 { margin: 0 0 12px; font-size: 0.875rem; font-weight: 500; }
+.rate { margin-bottom: 12px; }
+.rate-head { display: flex; justify-content: space-between; align-items: baseline; font-size: 0.875rem; }
+.rate-head strong { font-size: 1.125rem; font-weight: 500; font-variant-numeric: tabular-nums; }
+.rate-bar { display: flex; gap: 2px; height: 12px; margin: 2px 0 4px; background: var(--board); border-radius: 4px; overflow: hidden; }
+.rate-bar i { display: block; min-width: 2px; }
+.win { background: var(--seat0); }
+.draw { background: var(--draw); }
+.loss { background: var(--seat1); }
+.rate-counts { color: var(--muted); font-size: 0.75rem; font-variant-numeric: tabular-nums; }
+.legend { display: flex; justify-content: center; gap: 16px; margin: 0; padding: 0; color: var(--muted); font-size: 0.75rem; list-style: none; }
+.legend i { display: inline-block; width: 10px; height: 10px; margin-right: 5px; border-radius: 3px; }
+footer { margin-top: 32px; color: var(--muted); font-size: 0.75rem; text-align: center; }

@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Play the AI</title>
+<meta name="description" content="Play games against an AI trained by self-play. No sign-up.">
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main>
+  <h1 id="title">Play the AI</h1>
+  <nav id="picker" hidden aria-label="Games"></nav>
+  <div id="board" class="board" hidden></div>
+  <figure id="thinking" hidden>
+    <div id="bars" class="bars"></div>
+    <figcaption id="thought"></figcaption>
+  </figure>
+  <p id="status" role="status" aria-live="polite">Connecting…</p>
+  <p class="actions"><button id="new" type="button" hidden>New game</button></p>
+  <section id="record" hidden>
+    <h2>Win rate against this AI</h2>
+    <div id="rates"></div>
+    <ul class="legend" aria-hidden="true">
+      <li><i class="win"></i>Win</li>
+      <li><i class="draw"></i>Draw</li>
+      <li><i class="loss"></i>Loss</li>
+    </ul>
+  </section>
+  <footer>Games are recorded anonymously for research. We don't ask for your name or store your IP address.</footer>
+</main>
+<script src="app.js"></script>
+</body>
+</html>
