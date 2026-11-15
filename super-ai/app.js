@@ -325,9 +325,18 @@ async function open(info) {
   await newGame();
 }
 
+// Games with a board here; others, such as Catan, have a page of their own,
+// `<board>.html`.
+const here = (info) => info.board in BOARDS;
+
 function fromHash() {
   const id = location.hash.slice(1);
-  return games.find((info) => info.id === id) ?? games[0];
+  const info = games.find((info) => info.id === id);
+  if (info && !here(info)) {
+    location.replace(`${info.board}.html`);
+    return null;
+  }
+  return info ?? games.find(here);
 }
 
 async function main() {
@@ -343,14 +352,19 @@ async function main() {
     $("picker").hidden = false;
     $("picker").replaceChildren(...games.map((info) => {
       const link = document.createElement("a");
-      link.href = `#${info.id}`;
+      link.href = here(info) ? `#${info.id}` : `${info.board}.html`;
       link.textContent = info.name;
       link.dataset.game = info.id;
       return link;
     }));
   }
-  window.addEventListener("hashchange", () => open(fromHash()));
-  await open(fromHash());
+  window.addEventListener("hashchange", () => {
+    const info = fromHash();
+    if (info) open(info);
+  });
+  const info = fromHash();
+  if (info) await open(info);
+  else if (!games.some(here)) location.replace(`${games[0].board}.html`);
 }
 
 main();

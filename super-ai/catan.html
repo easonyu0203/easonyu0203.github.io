@@ -1,0 +1,858 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Catan vs. AI</title>
+<meta name="description" content="Play Catan against an AI trained by self-play. No sign-up.">
+<link rel="icon" href="data:,">
+<style>
+:root {
+  --sea: #3d8fd6; --sea-deep: #2a6fb3; --sand: #ecd9a4; --sand-edge: #c9ad6c;
+  --panel: #ffffff; --panel2: #f1f4f8; --line: #d5dde6; --text: #1d2733; --dim: #6a7889;
+  --you: #d9343a; --agent: #2c6fd6; --gold: #f2a900; --hint: #0aa5c7; --ok: #2e9a4b;
+  --lumber: #3c7a33; --brick: #c8613a; --wool: #94c94e; --grain: #eec03d; --ore: #8d99a6; --desert: #e3cf96;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--sea-deep); color: var(--text); font: 14px/1.35 "Segoe UI", system-ui, -apple-system, sans-serif; height: 100vh; overflow: hidden; user-select: none; }
+button { font: inherit; color: inherit; cursor: pointer; }
+#app { display: grid; grid-template-columns: 1fr 340px; height: 100vh; }
+#main { display: grid; grid-template-rows: 1fr auto; min-width: 0; min-height: 0; }
+
+@media (max-width: 900px) {
+  body { height: auto; overflow: auto; }
+  #app { grid-template-columns: 1fr; height: auto; }
+  #main { grid-template-rows: 70vh auto; }
+  footer { flex-wrap: wrap; }
+  .actions { margin-left: 0; flex-wrap: wrap; }
+  #log { max-height: 220px; }
+}
+a.tool { text-decoration: none; color: inherit; }
+#note { font-size: 11px; color: var(--dim); padding: 0 4px; }
+
+/* The sea and the board. */
+#boardwrap { position: relative; overflow: hidden; min-height: 0;
+  background: radial-gradient(ellipse at 50% 45%, #5aa7e6 0%, var(--sea) 45%, var(--sea-deep) 100%); }
+#board { width: 100%; height: calc(100% - 48px); margin-top: 48px; display: block; }
+#board .target { cursor: pointer; }
+@keyframes pulse { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
+#board .spot { animation: pulse 1.3s ease-in-out infinite; }
+#board .spot:hover { animation: none; opacity: 1; }
+
+/* Overlays on the board. */
+#topbar { position: absolute; top: 10px; left: 10px; right: 10px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; pointer-events: none; }
+#topbar > * { pointer-events: auto; }
+.chip { background: rgba(255,255,255,.92); border-radius: 10px; padding: 5px 10px; box-shadow: 0 2px 6px rgba(0,0,0,.18); font-size: 13px; }
+.tool { background: rgba(255,255,255,.92); border: none; border-radius: 10px; padding: 5px 10px; box-shadow: 0 2px 6px rgba(0,0,0,.18); font-size: 13px; font-weight: 600; }
+.tool:hover:not(:disabled) { background: #fff; }
+.tool.on { background: var(--hint); color: #fff; }
+.tool:disabled { opacity: .5; cursor: default; }
+select.tool { padding: 4px 6px; }
+kbd { font: 600 10px/1 ui-monospace, monospace; color: var(--dim); background: var(--panel2); border-radius: 4px; padding: 1px 4px; margin-left: 4px; }
+.tool.on kbd { background: rgba(255,255,255,.25); color: #fff; }
+.spacer { flex: 1; }
+#meta { color: var(--dim); max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+#banner { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); background: rgba(255,255,255,.95); color: var(--text);
+  padding: 7px 18px; border-radius: 20px; font-weight: 700; font-size: 15px; white-space: nowrap; pointer-events: none; box-shadow: 0 3px 10px rgba(0,0,0,.2);
+  display: flex; align-items: center; gap: 8px; }
+#banner .dot { width: 12px; height: 12px; border-radius: 50%; }
+#banner.win { background: var(--ok); color: #fff; } #banner.lose { background: #b7343a; color: #fff; }
+#hover { position: absolute; bottom: 54px; left: 50%; transform: translateX(-50%); background: rgba(20,30,45,.85); color: #fff; padding: 5px 12px; border-radius: 12px;
+  font-size: 13px; pointer-events: none; white-space: nowrap; }
+#hover:empty { display: none; }
+#toast { position: absolute; top: 100px; left: 50%; transform: translateX(-50%); background: #b7343a; color: #fff; padding: 6px 14px; border-radius: 10px; display: none; font-weight: 600; box-shadow: 0 3px 10px rgba(0,0,0,.25); }
+
+/* The right column: log, agent, bank, players. */
+aside { background: #e6ebf1; display: flex; flex-direction: column; min-height: 0; gap: 8px; padding: 8px; }
+.box { background: var(--panel); border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,.12); }
+.box h3 { margin: 0; padding: 7px 10px 4px; font-size: 11px; text-transform: uppercase; letter-spacing: .07em; color: var(--dim); display: flex; align-items: center; gap: 6px; }
+#log { flex: 1; min-height: 90px; overflow-y: auto; padding: 4px 10px 8px; font-size: 13px; }
+#log > div { padding: 2px 0; display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+#log .info { color: #9a6a00; font-weight: 600; }
+#log .end { color: var(--dim); border-bottom: 1px solid var(--line); padding-bottom: 4px; margin-bottom: 2px; font-size: 12px; }
+#log .who { font-weight: 700; }
+.mc { display: inline-grid; place-items: center; width: 17px; height: 22px; border-radius: 3px; font-size: 11px; border: 1.5px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.15); }
+.mc.lose { opacity: .55; }
+.minidie { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 4px; background: #fff; border: 1px solid #aab; font-size: 11px; font-weight: 800; }
+.minidie.seven { background: #b7343a; color: #fff; border-color: #b7343a; }
+
+details.box > summary { list-style: none; cursor: pointer; }
+details.box > summary::-webkit-details-marker { display: none; }
+details.box > summary h3::after { content: "▾"; margin-left: auto; }
+details.box:not([open]) > summary h3::after { content: "▸"; }
+#thinking { padding: 0 10px 4px; }
+#thinking .sub { font-size: 12px; color: var(--dim); margin-bottom: 3px; }
+.bars div { display: grid; grid-template-columns: 40px 64px 1fr; gap: 6px; font-size: 12px; align-items: center; }
+.bar { height: 7px; background: var(--hint); border-radius: 4px; }
+#chart { width: 100%; height: 60px; display: block; padding: 0 10px 8px; }
+
+#bank { display: flex; gap: 5px; padding: 0 10px 9px; align-items: flex-end; }
+.bcard { width: 36px; height: 46px; border-radius: 6px; border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.18); display: grid; place-items: center; font-size: 16px; position: relative; }
+.bcard b { position: absolute; bottom: -7px; left: 50%; transform: translateX(-50%); background: #fff; border-radius: 8px; padding: 0 5px; font-size: 11px; box-shadow: 0 1px 2px rgba(0,0,0,.3); }
+.bcard.devback, .cardback.dev { background: linear-gradient(150deg, #7b5cc0, #47307e); }
+
+.player { padding: 9px 10px; display: grid; grid-template-columns: 44px 1fr auto; gap: 9px; align-items: center; border: 2px solid transparent; }
+.player.active { border-color: var(--gold); box-shadow: 0 0 0 3px rgba(242,169,0,.25), 0 1px 3px rgba(0,0,0,.12); }
+.avatar { width: 44px; height: 44px; border-radius: 10px; display: grid; place-items: center; font-size: 24px; color: #fff; position: relative; }
+.avatar .turn { position: absolute; bottom: -5px; right: -5px; background: var(--gold); border-radius: 50%; width: 18px; height: 18px; font-size: 11px; display: grid; place-items: center; border: 2px solid #fff; }
+.pname { font-weight: 700; display: flex; align-items: baseline; gap: 6px; }
+.pname small { color: var(--dim); font-weight: 400; font-size: 11.5px; }
+.picons { display: flex; gap: 9px; margin-top: 4px; font-size: 13px; font-weight: 700; }
+.pi { display: flex; align-items: center; gap: 3px; }
+.pi.award { color: #9a6a00; }
+.pi.award .ico { background: var(--gold); border-radius: 4px; }
+.cardback { display: inline-block; width: 13px; height: 17px; border-radius: 2.5px; border: 1.5px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.25); }
+.cardback.res { background: linear-gradient(150deg, #c74b3b, #8f2d22); }
+.pvp { text-align: center; min-width: 46px; }
+.pvp b { display: block; font-size: 26px; line-height: 1; }
+.pvp small { font-size: 10.5px; color: var(--dim); }
+.minihand { display: flex; gap: 3px; margin-top: 5px; }
+.minihand .mc { width: 22px; height: 26px; font-size: 10.5px; font-weight: 800; color: #111; line-height: 1; flex-direction: column; display: inline-flex; justify-content: center; align-items: center; }
+.minihand .mc.zero { opacity: .3; }
+.left { font-size: 11px; color: var(--dim); margin-top: 3px; }
+
+/* Your hand and the action bar. */
+footer { display: flex; align-items: flex-end; gap: 14px; padding: 10px 16px 12px; background: linear-gradient(to top, rgba(10,30,55,.55), rgba(10,30,55,.25)); min-height: 124px; }
+.hand { display: flex; gap: 14px; align-items: flex-end; padding-top: 12px; }
+.hand .empty { color: rgba(255,255,255,.75); font-size: 13px; padding-bottom: 30px; }
+.card { position: relative; width: 62px; height: 88px; border-radius: 8px; border: 3px solid #fbf6ea; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  color: #111; background: #ddd; padding: 0; transition: transform .12s; }
+.card .icon { font-size: 32px; line-height: 1; filter: drop-shadow(0 1px 1px rgba(0,0,0,.25)); }
+.card .lbl { font-size: 9.5px; font-weight: 800; text-transform: uppercase; margin-top: 5px; letter-spacing: .04em; background: rgba(255,255,255,.75); border-radius: 4px; padding: 0 4px; }
+.card .count { position: absolute; top: -9px; right: -9px; background: #fff; color: #111; border-radius: 50%; width: 25px; height: 25px; display: grid; place-items: center; font-weight: 800; font-size: 13px; box-shadow: 0 1px 4px rgba(0,0,0,.4); }
+.card.zero { opacity: .3; }
+.card.dev { background: linear-gradient(160deg, #7b5cc0, #47307e); color: #fff; }
+.card.dev .lbl { background: rgba(255,255,255,.18); color: #fff; }
+.card.playable { cursor: pointer; box-shadow: 0 0 0 3px var(--gold), 0 4px 10px rgba(0,0,0,.35); }
+.card.playable:hover { transform: translateY(-6px); }
+.card.locked { filter: grayscale(.5); opacity: .7; }
+.card .new { position: absolute; bottom: -8px; background: var(--hint); color: #fff; font-size: 10px; border-radius: 6px; padding: 0 5px; font-weight: 700; }
+.pct { position: absolute; top: -9px; left: -9px; background: var(--hint); color: #fff; border-radius: 8px; padding: 1px 5px; font-size: 11px; font-weight: 700; box-shadow: 0 1px 3px rgba(0,0,0,.3); z-index: 2; }
+.divider { width: 2px; align-self: stretch; margin: 14px 0 4px; background: rgba(255,255,255,.25); border-radius: 1px; }
+.actions { margin-left: auto; display: flex; gap: 8px; align-items: flex-end; }
+.act { position: relative; width: 66px; height: 74px; border-radius: 12px; background: #fff; border: none; box-shadow: 0 3px 8px rgba(0,0,0,.3); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; padding: 4px 2px; }
+.act svg { width: 30px; height: 30px; }
+.act .icon { font-size: 26px; line-height: 30px; }
+.act .lbl { font-size: 10.5px; font-weight: 700; }
+.act .cost { display: flex; gap: 1px; }
+.act .cost .mc { width: 11px; height: 14px; font-size: 7.5px; border-width: 1px; }
+.act:not(:disabled):hover { transform: translateY(-3px); }
+.act:disabled { opacity: .45; cursor: default; box-shadow: none; }
+.act.on { background: var(--gold); }
+.act kbd { position: absolute; top: 3px; right: 4px; margin: 0; }
+#dice { display: flex; gap: 6px; padding: 10px; border-radius: 14px; background: rgba(255,255,255,.18); border: none; height: 74px; align-items: center; position: relative; }
+#dice.go { background: var(--ok); box-shadow: 0 0 0 3px #fff, 0 4px 14px rgba(0,0,0,.35); animation: glow 1.2s ease-in-out infinite; }
+@keyframes glow { 50% { box-shadow: 0 0 0 3px #fff, 0 0 22px rgba(255,255,255,.9); } }
+#dice:disabled { cursor: default; }
+.die { width: 46px; height: 46px; background: #fff; border-radius: 9px; display: grid; grid-template: repeat(3, 1fr) / repeat(3, 1fr); padding: 6px; box-shadow: inset 0 -3px 0 rgba(0,0,0,.12), 0 2px 4px rgba(0,0,0,.3); }
+.die i { border-radius: 50%; margin: 1.5px; }
+.die i.on { background: #222; }
+.die.seven i.on { background: #c8102e; }
+.die.blank { opacity: .5; }
+@keyframes roll { 0% { transform: rotate(0) scale(1); } 40% { transform: rotate(200deg) scale(1.15); } 100% { transform: rotate(360deg) scale(1); } }
+#dice.rolling .die { animation: roll .55s ease-out; }
+#dice.rolling .die + .die { animation-delay: .06s; }
+#dice .sum { position: absolute; top: -10px; left: 50%; transform: translateX(-50%); background: #fff; border-radius: 8px; padding: 0 7px; font-weight: 800; font-size: 12px; box-shadow: 0 1px 3px rgba(0,0,0,.3); }
+.act.end { width: 74px; background: var(--ok); color: #fff; }
+.act.end:disabled { background: #fff; color: var(--text); }
+
+/* Pop-ups. */
+.pop { position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%); background: var(--panel); border-radius: 16px; padding: 14px 16px 12px; box-shadow: 0 10px 34px rgba(0,0,0,.45); display: none; z-index: 5; }
+.pop.center { bottom: auto; top: 50%; transform: translate(-50%, -50%); }
+.pop h4 { margin: 0 0 12px; font-size: 15px; }
+.pop .row { display: flex; gap: 12px; margin-bottom: 14px; align-items: center; }
+.pop .row > span { width: 40px; color: var(--dim); font-size: 12px; font-weight: 700; text-transform: uppercase; }
+.pop .card { width: 54px; height: 74px; }
+.pop .card .icon { font-size: 26px; }
+.pop .card.sel { box-shadow: 0 0 0 3px var(--gold), 0 4px 10px rgba(0,0,0,.35); transform: translateY(-4px); }
+.pop .card:not(:disabled):not(.sel) { cursor: pointer; }
+.pop .card:not(:disabled):hover { transform: translateY(-4px); }
+.pop .card:disabled { opacity: .25; cursor: default; }
+.pop .rate { position: absolute; bottom: -9px; background: #fff; border-radius: 6px; padding: 0 5px; font-size: 10.5px; font-weight: 800; box-shadow: 0 1px 3px rgba(0,0,0,.3); }
+.pop .note { color: var(--dim); font-size: 12px; }
+.pop .close { float: right; background: none; border: none; color: var(--dim); font-size: 20px; margin: -8px -6px 0 0; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="main">
+    <div id="boardwrap">
+      <svg id="board" viewBox="-5.6 -5.2 11.2 10.4" preserveAspectRatio="xMidYMid meet"></svg>
+      <div id="topbar">
+        <span class="chip"><b>Catan</b> against the AI · <span id="tally">–</span></span>
+        <span class="chip" id="meta"></span>
+        <span class="spacer"></span>
+        <a class="tool" id="others" href="index.html" hidden>Other games</a>
+        <button class="tool" id="newBtn">New game</button>
+      </div>
+      <div id="banner">Connecting…</div>
+      <div id="toast"></div>
+      <div id="hover"></div>
+      <div class="pop" id="tradePop"></div>
+      <div class="pop" id="pickPop"></div>
+      <div class="pop center" id="discardPop"></div>
+    </div>
+    <footer>
+      <div class="hand" id="hand"></div>
+      <div class="divider"></div>
+      <div class="hand" id="dev"></div>
+      <div class="actions" id="actions"></div>
+    </footer>
+  </div>
+  <aside>
+    <div class="box" style="flex:1;display:flex;flex-direction:column;min-height:0"><h3>Log</h3><div id="log"></div></div>
+    <details class="box" id="agentBox" open>
+      <summary><h3>AI</h3></summary>
+      <div id="thinking"></div>
+    </details>
+    <div class="box"><h3>Bank</h3><div id="bank"></div></div>
+    <div id="players" style="display:flex;flex-direction:column;gap:8px"></div>
+    <div id="note">You place first; first to 15 points wins. Games are recorded anonymously for research. We don't ask for your name or store your IP address.</div>
+  </aside>
+</div>
+<script>
+const RES = ["lumber", "brick", "wool", "grain", "ore"];
+const ICON = ["🌲", "🧱", "🐑", "🌾", "🪨"];
+const COLOR = ["var(--lumber)", "var(--brick)", "var(--wool)", "var(--grain)", "var(--ore)", "var(--desert)"];
+const CARD_NAMES = ["Knight", "Victory point", "Road building", "Year of plenty", "Monopoly"];
+const CARD_ICONS = ["⚔️", "🏆", "🛤️", "🎁", "💰"];
+const SEAT_COLOR = ["#d9343a", "#2c6fd6"];
+const COST = { road: [0, 1], settlement: [0, 1, 2, 3], city: [3, 3, 4, 4, 4], buy: [2, 3, 4] };
+const SVGNS = "http://www.w3.org/2000/svg";
+let L = null, V = null, busy = false, tradeGive = null, plenty = [];
+let G = null;  // The game in play, as the server last described it.
+let mode = null;  // The piece you're placing in the main phase: "road", "settlement" or "city".
+let diceKey = null;
+
+const $ = (id) => document.getElementById(id);
+const K = () => L.kinds;  // BUILD, ROAD, ROBBER, TRADE, BUY, KNIGHT, ROAD_BUILDING, PLENTY, MONOPOLY, DISCARD, ROLL, END
+const legal = (a) => V && V.legal[a] !== undefined;
+const legalActions = () => Object.keys(V.legal).map(Number);
+const pct = () => null;  // No hints in recorded games.
+const fmtPct = (p) => (p * 100).toFixed(p < 0.1 ? 1 : 0) + "%";
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const dots = (n) => n ? 6 - Math.abs(n - 7) : 0;
+const mc = (r, cls = "") => `<span class="mc ${cls}" style="background:${COLOR[r]}" title="${RES[r]}">${ICON[r]}</span>`;
+
+// The page on GitHub Pages calls the API on the server; anywhere else, such
+// as when the server itself serves the page, it's the same address.
+const API = location.hostname.endsWith("github.io") ? "https://eason-blacky.tail8a6998.ts.net:8443" : "";
+const GAME = "catan";
+
+function stored(key, make) {
+  // Storage can be unavailable, such as in a private window; everything
+  // still works, except that a reload starts over.
+  try {
+    let value = localStorage.getItem(key);
+    if (value === null && make) { value = make(); localStorage.setItem(key, value); }
+    return value;
+  } catch { return make ? make() : null; }
+}
+function store(key, value) {
+  try { if (value === null) localStorage.removeItem(key); else localStorage.setItem(key, value); } catch {}
+}
+const player = stored("player", () => crypto.randomUUID());
+const gameKey = `game:${GAME}`;
+
+async function api(path, body) {
+  const r = await fetch(API + path, body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  if (!r.ok) { const e = new Error(`${r.status}`); e.status = r.status; throw e; }
+  return r.json();
+}
+
+// The server's game, in the shape the drawing code reads.
+function fromGame(g) {
+  const over = g.result !== null;
+  return {
+    ...g.catan,
+    legal: g.legal ? g.catan.labels : {},
+    your_turn: !over && g.legal !== null,
+    over,
+    result: { win: "you", loss: "agent", draw: "draw", abandoned: "abandoned" }[g.result] ?? null,
+    hint: null, hint_probs: null,
+  };
+}
+
+async function act(action) {
+  if (busy || !G || G.result) return;
+  busy = true;
+  mode = null;
+  $("banner").lastChild.textContent = "The AI is playing…";
+  try {
+    G = await api(`/play/${G.id}/moves`, { action });
+    show(fromGame(G));
+    if (G.result) { store(gameKey, null); showRecord(); }
+  } catch (e) {
+    if (e.status === 409 || e.status === 404) {
+      store(gameKey, null);
+      G = { ...G, result: "abandoned" };
+      show(fromGame(G));
+      toast("That game has ended. Start a new one.");
+    } else {
+      show(V);
+      toast(e.status === 422 ? "That isn't legal now." : "Couldn't reach the AI. Try that again.");
+    }
+  } finally { busy = false; }
+}
+
+async function newGame() {
+  if (busy) return;
+  busy = true;
+  mode = null; closePops();
+  try {
+    G = await api(`/games/${GAME}/play`, { player });
+    store(gameKey, G.id);
+    show(fromGame(G));
+    showRecord();
+  } catch (e) {
+    $("banner").textContent = e.status === 429 ? "Lots of games are starting right now. Try again in a minute." : "The AI is offline right now. Please try again later.";
+  } finally { busy = false; }
+}
+
+async function showRecord() {
+  try {
+    const s = await api(`/games/${GAME}/stats?player=${encodeURIComponent(player)}`);
+    const rec = (r) => `${r.win}–${r.loss}${r.draw ? `–${r.draw}` : ""}`;
+    $("tally").innerHTML = `you <b>${rec(s.you)}</b> · all humans <b>${rec(s.all)}</b>`;
+    $("tally").title = "Wins–losses(–draws) against this AI";
+  } catch {}
+}
+
+async function main() {
+  let games;
+  try { games = await api("/games"); } catch { $("banner").textContent = "The AI is offline right now. Please try again later."; return; }
+  const info = games.find((g) => g.id === GAME);
+  if (!info) { $("banner").textContent = "Catan isn't on offer right now."; return; }
+  L = info.layout;
+  $("meta").textContent = info.agent;
+  $("others").hidden = games.length < 2;
+  const saved = stored(gameKey);
+  if (saved) {
+    try {
+      const g = await api(`/play/${saved}`);
+      // It may be against an earlier agent, and still finishes against it.
+      if (!g.result) { G = g; show(fromGame(G)); showRecord(); return; }
+    } catch (e) { if (!e.status) { $("banner").textContent = "The AI is offline right now. Please try again later."; return; } }
+    store(gameKey, null);
+  }
+  await newGame();
+}
+
+function toast(text) {
+  const t = $("toast");
+  t.textContent = text; t.style.display = "block";
+  clearTimeout(t.timer); t.timer = setTimeout(() => (t.style.display = "none"), 2200);
+}
+
+function el(tag, attrs, parent) {
+  const e = document.createElementNS(SVGNS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+
+function kindOf(a) {
+  let k = 0;
+  while (k + 1 < K().length && a >= K()[k + 1]) k++;
+  return k;
+}
+
+// What placing `a` puts down: "road", "settlement", "city", "robber", or null.
+function modeOf(a) {
+  const k = kindOf(a), i = a - K()[k];
+  if (k === 0) return V.buildings[V.you][i] === 1 ? "city" : "settlement";
+  return { 1: "road", 2: "robber" }[k] || null;
+}
+
+// Board targets show for the setup, the robber, and road building, and in the
+// main phase for the piece you picked in the bar.
+const shown = (a) => V.your_turn && legal(a) && (V.phase !== "main" || mode === modeOf(a));
+const ofMode = (m) => legalActions().filter((a) => modeOf(a) === m);
+const ofKind = (k) => legalActions().filter((a) => kindOf(a) === k);
+const sumPct = (as) => V.hint_probs ? as.reduce((t, a) => t + (V.hint_probs[a] || 0), 0) : null;
+
+// Units have y up; SVG has y down.
+const P = (xy) => [xy[0], -xy[1]];
+
+function hexPoints(c, r, rot = 0) {
+  const [x, y] = P(c);
+  return [...Array(6)].map((_, k) => {
+    const a = (Math.PI / 180) * (90 - 60 * k + rot);
+    return `${(x + r * Math.cos(a)).toFixed(3)},${(y - r * Math.sin(a)).toFixed(3)}`;
+  }).join(" ");
+}
+
+function house(x, y, s, city) {
+  const pts = city
+    ? [[-1.3, .8], [-1.3, -.4], [-.45, -.4], [-.45, -1], [.15, -1.55], [.75, -1], [.75, -.1], [1.3, -.1], [1.3, .8]]
+    : [[-.9, .8], [-.9, -.3], [0, -1.1], [.9, -.3], [.9, .8]];
+  return pts.map(([a, b]) => `${(x + a * s).toFixed(3)},${(y + b * s).toFixed(3)}`).join(" ");
+}
+
+function pieceSVG(kind, color) {
+  const body = kind === "road"
+    ? `<rect x="4" y="12" width="22" height="7" rx="3" transform="rotate(-30 15 15)" fill="${color}" stroke="#222" stroke-width="1.5"/>`
+    : `<polygon points="${house(15, 17, kind === "city" ? 7 : 8.5, kind === "city")}" fill="${color}" stroke="#222" stroke-width="1.5" stroke-linejoin="round"/>`;
+  return `<svg viewBox="0 0 30 30">${body}</svg>`;
+}
+
+// Terrain art: a shaded tile and a few small motifs around its number.
+function defs(svg) {
+  const d = el("defs", {}, svg);
+  const shades = [["#4f9443", "#2c5f26"], ["#d9774c", "#a84a27"], ["#a9d862", "#78ad3b"], ["#f6d360", "#d9a521"], ["#a5b0bb", "#6f7b88"], ["#efdeab", "#d1b977"]];
+  shades.forEach(([a, b], t) => {
+    const g = el("radialGradient", { id: `t${t}`, cx: "50%", cy: "45%", r: "60%" }, d);
+    el("stop", { offset: "0%", "stop-color": a }, g);
+    el("stop", { offset: "100%", "stop-color": b }, g);
+  });
+  const glow = el("filter", { id: "shadow", x: "-50%", y: "-50%", width: "200%", height: "200%" }, d);
+  el("feDropShadow", { dx: 0, dy: .04, stdDeviation: .04, "flood-opacity": .45 }, glow);
+}
+
+function motif(t, x, y, s, g) {
+  if (t === 0) {  // Forest: pines.
+    el("rect", { x: x - .015 * s, y: y + .05 * s, width: .03 * s, height: .06 * s, fill: "#5a3b1e" }, g);
+    el("polygon", { points: `${x},${y - .15 * s} ${x - .09 * s},${y + .06 * s} ${x + .09 * s},${y + .06 * s}`, fill: "#1e4a1b" }, g);
+    el("polygon", { points: `${x},${y - .2 * s} ${x - .06 * s},${y - .04 * s} ${x + .06 * s},${y - .04 * s}`, fill: "#2b6326" }, g);
+  } else if (t === 1) {  // Hills: bricks.
+    for (const [dx, dy] of [[-.06, 0], [.06, 0], [0, -.06]]) {
+      el("rect", { x: x + (dx - .055) * s, y: y + (dy - .025) * s, width: .11 * s, height: .05 * s, rx: .01, fill: "#9c3f1c", stroke: "#e7a07a", "stroke-width": .012 }, g);
+    }
+  } else if (t === 2) {  // Pasture: a sheep.
+    el("ellipse", { cx: x, cy: y, rx: .08 * s, ry: .055 * s, fill: "#fbfbf5", stroke: "#999", "stroke-width": .01 }, g);
+    el("circle", { cx: x + .08 * s, cy: y - .025 * s, r: .03 * s, fill: "#333" }, g);
+    el("line", { x1: x - .04 * s, y1: y + .05 * s, x2: x - .04 * s, y2: y + .09 * s, stroke: "#333", "stroke-width": .016 }, g);
+    el("line", { x1: x + .04 * s, y1: y + .05 * s, x2: x + .04 * s, y2: y + .09 * s, stroke: "#333", "stroke-width": .016 }, g);
+  } else if (t === 3) {  // Fields: a sheaf.
+    for (const a of [-25, 0, 25]) {
+      const r = a * Math.PI / 180, tx = x + Math.sin(r) * .13 * s, ty = y - Math.cos(r) * .13 * s;
+      el("line", { x1: x, y1: y + .07 * s, x2: tx, y2: ty, stroke: "#9b6f0e", "stroke-width": .016 }, g);
+      el("ellipse", { cx: tx, cy: ty, rx: .02 * s, ry: .045 * s, fill: "#c08c16", transform: `rotate(${a} ${tx} ${ty})` }, g);
+    }
+  } else if (t === 4) {  // Mountains: a peak with snow.
+    el("polygon", { points: `${x - .13 * s},${y + .08 * s} ${x},${y - .14 * s} ${x + .13 * s},${y + .08 * s}`, fill: "#5d6873" }, g);
+    el("polygon", { points: `${x - .045 * s},${y - .065 * s} ${x},${y - .14 * s} ${x + .045 * s},${y - .065 * s}`, fill: "#f4f6f8" }, g);
+  } else {  // Desert: a cactus.
+    el("path", { d: `M${x},${y + .1 * s} V${y - .12 * s} M${x - .06 * s},${y - .06 * s} V${y} H${x} M${x + .06 * s},${y - .09 * s} V${y - .02 * s} H${x}`, stroke: "#5f8f3a", "stroke-width": .03 * s, fill: "none", "stroke-linecap": "round" }, g);
+  }
+}
+
+function drawBoard() {
+  const svg = $("board");
+  svg.innerHTML = "";
+  defs(svg);
+  const you = V.you, marked = V.marked;
+  const ranks = {};
+  (V.hint || []).slice(0, 3).forEach((h, i) => (ranks[h.action] = i + 1));
+  const produced = V.last_roll && V.phase !== "roll" && !V.phase.startsWith("setup") ? V.last_roll : 0;
+
+  // The island's sandy shore.
+  el("polygon", { points: hexPoints([0, 0], 4.72, 30), fill: "var(--sand)", stroke: "var(--sand-edge)", "stroke-width": .08, "stroke-linejoin": "round", filter: "url(#shadow)" }, svg);
+
+  // Harbors: docks to their two intersections, and a badge.
+  L.harbors.forEach((h, i) => {
+    const [x, y] = P(h.xy), kind = V.harbors[i];
+    for (const v of h.vertices) {
+      const [vx, vy] = P(L.vertices[v]);
+      el("line", { x1: x, y1: y, x2: x + (vx - x) * .85, y2: y + (vy - y) * .85, stroke: "#7a5530", "stroke-width": .11, "stroke-linecap": "round" }, svg);
+      el("line", { x1: x, y1: y, x2: x + (vx - x) * .85, y2: y + (vy - y) * .85, stroke: "#b88a55", "stroke-width": .06, "stroke-linecap": "round", "stroke-dasharray": ".05 .04" }, svg);
+    }
+    const g = el("g", { filter: "url(#shadow)" }, svg);
+    el("circle", { cx: x, cy: y, r: .33, fill: "#fffaf0", stroke: kind === 5 ? "#7a5530" : COLOR[kind], "stroke-width": .07 }, g);
+    if (kind === 5) {
+      el("text", { x, y: y - .02, "text-anchor": "middle", "font-size": .2 }, g).textContent = "⚓";
+      el("text", { x, y: y + .2, "text-anchor": "middle", "font-size": .17, "font-weight": 800, fill: "#333" }, g).textContent = "3:1";
+    } else {
+      el("text", { x, y: y - .01, "text-anchor": "middle", "font-size": .22 }, g).textContent = ICON[kind];
+      el("text", { x, y: y + .2, "text-anchor": "middle", "font-size": .17, "font-weight": 800, fill: "#333" }, g).textContent = "2:1";
+    }
+  });
+
+  // Hexes.
+  L.hexes.forEach((c, h) => {
+    const t = V.terrain[h], n = V.numbers[h], [x, y] = P(c);
+    const g = el("g", {}, svg);
+    const hot = produced && n === produced && V.robber !== h;
+    el("polygon", { points: hexPoints(c, .96), fill: `url(#t${t})`, stroke: hot ? "#fff6c2" : "#f4e7c3", "stroke-width": hot ? .1 : .055, "stroke-linejoin": "round" }, g);
+    const spots = n ? [[0, .62], [60, .6], [120, .6], [180, .6], [240, .6], [300, .6]] : [[90, .5], [210, .45], [330, .45], [0, 0]];
+    spots.forEach(([a, r], k) => {
+      if (n && (k === 3 || k === 0)) return;  // Leave room beside the token.
+      const rad = a * Math.PI / 180;
+      motif(t, x + r * Math.cos(rad), y - r * Math.sin(rad), n ? 1.15 : (r ? 1.2 : 1.9), g);
+    });
+    if (n) {
+      const red = n === 6 || n === 8;
+      el("circle", { cx: x, cy: y, r: .34, fill: hot ? "#fff3a8" : "#fbf3df", stroke: hot ? "var(--gold)" : "#b49b6b", "stroke-width": hot ? .07 : .03, filter: "url(#shadow)" }, g);
+      el("text", { x, y: y + .08, "text-anchor": "middle", "font-size": .3, "font-weight": 800, fill: red ? "#c8102e" : "#2a2a2a" }, g).textContent = n;
+      const d = dots(n);
+      for (let k = 0; k < d; k++) el("circle", { cx: x + (k - (d - 1) / 2) * .07, cy: y + .2, r: .024, fill: red ? "#c8102e" : "#2a2a2a" }, g);
+    }
+    if (V.robber === h) {
+      const rx = x + (n ? .42 : 0), ry = y + .05;
+      const r = el("g", { filter: "url(#shadow)" }, g);
+      el("path", { d: `M${rx - .15},${ry + .26} Q${rx - .14},${ry - .05} ${rx},${ry - .1} Q${rx + .14},${ry - .05} ${rx + .15},${ry + .26} Z`, fill: "#3a3a3a", stroke: "#111", "stroke-width": .025 }, r);
+      el("circle", { cx: rx, cy: ry - .17, r: .1, fill: "#3a3a3a", stroke: "#111", "stroke-width": .025 }, r);
+    }
+    const a = K()[2] + h;
+    if (shown(a)) {
+      const hit = el("polygon", { points: hexPoints(c, .88), class: "target spot", "data-action": a, fill: "rgba(255,255,255,.18)", stroke: "#fff", "stroke-width": .08, "stroke-dasharray": ".16 .1" }, svg);
+      hit.addEventListener("mouseenter", () => hit.setAttribute("fill", "rgba(255,255,255,.4)"));
+      hit.addEventListener("mouseleave", () => hit.setAttribute("fill", "rgba(255,255,255,.18)"));
+    }
+    if (marked === a) el("polygon", { points: hexPoints(c, .88), fill: "none", stroke: "var(--gold)", "stroke-width": .09 }, svg);
+  });
+
+  // Roads.
+  L.edges.forEach(([a, b], e) => {
+    const [x1, y1] = P(L.vertices[a]), [x2, y2] = P(L.vertices[b]);
+    const s = .16, ax = x1 + (x2 - x1) * s, ay = y1 + (y2 - y1) * s, bx = x2 - (x2 - x1) * s, by = y2 - (y2 - y1) * s;
+    const owner = V.roads[0][e] ? 0 : V.roads[1][e] ? 1 : -1;
+    const action = K()[1] + e;
+    if (owner >= 0) {
+      if (marked === action) el("line", { x1: ax, y1: ay, x2: bx, y2: by, stroke: "var(--gold)", "stroke-width": .3, "stroke-linecap": "round" }, svg);
+      el("line", { x1: ax, y1: ay, x2: bx, y2: by, stroke: "#1a1a1a", "stroke-width": .2, "stroke-linecap": "round" }, svg);
+      el("line", { x1: ax, y1: ay, x2: bx, y2: by, stroke: SEAT_COLOR[owner], "stroke-width": .13, "stroke-linecap": "round" }, svg);
+    } else if (shown(action)) {
+      const g = el("g", { class: "target", "data-action": action }, svg);
+      el("line", { x1: ax, y1: ay, x2: bx, y2: by, stroke: "transparent", "stroke-width": .32 }, g);
+      el("line", { x1: ax, y1: ay, x2: bx, y2: by, stroke: "rgba(0,0,0,.45)", "stroke-width": .17, "stroke-linecap": "round" }, g);
+      const vis = el("line", { x1: ax, y1: ay, x2: bx, y2: by, class: "spot", stroke: "#fff", "stroke-width": .09, "stroke-linecap": "round" }, g);
+      g.addEventListener("mouseenter", () => { vis.setAttribute("stroke", SEAT_COLOR[you]); vis.setAttribute("stroke-width", .12); });
+      g.addEventListener("mouseleave", () => { vis.setAttribute("stroke", "#fff"); vis.setAttribute("stroke-width", .09); });
+    }
+  });
+
+  // Buildings, and where you can build.
+  L.vertices.forEach((xy, v) => {
+    const [x, y] = P(xy), action = K()[0] + v;
+    const level = [V.buildings[0][v], V.buildings[1][v]];
+    const owner = level[0] ? 0 : level[1] ? 1 : -1;
+    const can = shown(action);
+    if (owner >= 0) {
+      if (marked === action) el("circle", { cx: x, cy: y, r: .3, fill: "none", stroke: "var(--gold)", "stroke-width": .07 }, svg);
+      const city = level[owner] === 2;
+      const shape = el("polygon", { points: house(x, y + .02, city ? .14 : .15, city), fill: SEAT_COLOR[owner], stroke: "#111", "stroke-width": .035, "stroke-linejoin": "round", filter: "url(#shadow)" }, svg);
+      if (can) {  // A city over your settlement.
+        const ring = el("circle", { cx: x, cy: y, r: .3, fill: "rgba(255,255,255,.2)", stroke: "#fff", "stroke-width": .06, class: "target spot", "data-action": action }, svg);
+        ring.addEventListener("mouseenter", () => shape.setAttribute("points", house(x, y + .02, .14, true)));
+        ring.addEventListener("mouseleave", () => shape.setAttribute("points", house(x, y + .02, .15, false)));
+      }
+    } else if (can) {
+      const g = el("g", { class: "target", "data-action": action }, svg);
+      el("circle", { cx: x, cy: y, r: .22, fill: "transparent" }, g);
+      const c = el("circle", { cx: x, cy: y, r: .12, class: "spot", fill: "#fff", stroke: "#333", "stroke-width": .03 }, g);
+      const ghost = el("polygon", { points: house(x, y + .02, .15, false), fill: SEAT_COLOR[you], stroke: "#111", "stroke-width": .035, opacity: 0 }, g);
+      g.addEventListener("mouseenter", () => { c.setAttribute("opacity", 0); ghost.setAttribute("opacity", .9); });
+      g.addEventListener("mouseleave", () => { c.removeAttribute("opacity"); ghost.setAttribute("opacity", 0); });
+    }
+  });
+
+  // The hint's top three on the board; click one to play it.
+  for (const a in ranks) {
+    const k = kindOf(+a), i = +a - K()[k];
+    if (k > 2) continue;
+    let xy;
+    if (k === 0) xy = P(L.vertices[i]);
+    else if (k === 1) { const [p, q] = L.edges[i].map((v) => P(L.vertices[v])); xy = [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2]; }
+    else { xy = P(L.hexes[i]); xy = [xy[0] - .45, xy[1] + .1]; }
+    const g = el("g", { class: "target", "data-action": a }, svg);
+    el("circle", { cx: xy[0] + .2, cy: xy[1] - .2, r: .15, fill: "var(--hint)", stroke: "#fff", "stroke-width": .03 }, g);
+    el("text", { x: xy[0] + .2, y: xy[1] - .14, "text-anchor": "middle", "font-size": .18, "font-weight": 800, fill: "#fff" }, g).textContent = ranks[a];
+  }
+
+  for (const t of svg.querySelectorAll(".target")) {
+    const a = +t.dataset.action;
+    t.addEventListener("click", () => act(a));
+    t.addEventListener("mouseenter", () => ($("hover").textContent = hoverText(a)));
+    t.addEventListener("mouseleave", () => ($("hover").textContent = ""));
+  }
+}
+
+function hoverText(a) {
+  const k = kindOf(a), i = a - K()[k];
+  let s = V.legal[a] || "";
+  if (k === 0) s += ` · ${L.vertex_hexes[i].reduce((t, h) => t + dots(V.numbers[h]), 0)} dots`;
+  if (k === 2) {
+    const lv = [0, 1].map((seat) => L.hex_vertices[i].reduce((t, v) => t + V.buildings[seat][v], 0));
+    s += ` · ${dots(V.numbers[i])} dots · blocks you ${lv[V.you]}, AI ${lv[1 - V.you]}`;
+  }
+  const p = pct(a);
+  return p === null ? s : `${s} · agent: ${fmtPct(p)}`;
+}
+
+function prompt() {
+  if (V.over) return V.result === "you" ? "You win! 🎉" : V.result === "agent" ? "The AI wins" : V.result === "abandoned" ? "This game has ended" : "A draw: the turn limit";
+  if (!V.your_turn) return "The AI is playing…";
+  const me = V.players[0];
+  if (V.phase === "main" && mode) return `Place a ${mode} · Esc to cancel`;
+  return {
+    "setup settlement": "Place a settlement",
+    "setup road": "Place a road next to it",
+    "roll": "Roll the dice, or play a knight first",
+    "main": "Build, trade, or end your turn",
+    "discard": `Discard ${me.to_discard} card${me.to_discard > 1 ? "s" : ""}`,
+    "robber": "Move the robber",
+    "road building": `Place ${V.free_roads} free road${V.free_roads > 1 ? "s" : ""}`,
+  }[V.phase];
+}
+
+function drawPlayers() {
+  const order = [V.players[1], V.players[0]];  // The agent on top, you below.
+  $("players").innerHTML = order.map((p) => {
+    const active = !V.over && V.turn_seat === p.seat;
+    const hand = p.hand.map((n, r) => `<span class="mc ${n ? "" : "zero"}" style="background:${COLOR[r]}" title="${RES[r]}">${ICON[r]}<b>${n}</b></span>`).join("");
+    const total = p.hand.reduce((a, b) => a + b, 0);
+    const yours = p.who === "you";
+    const vpNote = p.hidden ? `incl. ${p.hidden} 🏆` : !yours && p.card_count ? "+ hidden?" : "of 15";
+    return `<div class="box player ${active ? "active" : ""}">
+      <div class="avatar" style="background:${SEAT_COLOR[p.seat]}">${yours ? "🙂" : "🤖"}${active ? `<span class="turn">⏳</span>` : ""}</div>
+      <div>
+        <div class="pname">${yours ? "You" : "AI"}<small>${p.seat === 0 ? "first" : "second"}${p.to_discard ? ` · discarding ${p.to_discard}` : ""}</small></div>
+        <div class="picons">
+          <span class="pi" title="resource cards"><span class="cardback res"></span>${total}</span>
+          <span class="pi" title="development cards"><span class="cardback dev"></span>${p.card_count}</span>
+          <span class="pi ${p.largest ? "award" : ""}" title="knights played${p.largest ? " · Largest Army" : ""}"><span class="ico">⚔️</span>${p.knights}</span>
+          <span class="pi ${p.longest ? "award" : ""}" title="longest road${p.longest ? " · Longest Road" : ""}"><span class="ico">🛤️</span>${p.road}</span>
+        </div>
+        <div class="minihand">${hand}</div>
+        <div class="left">${p.left[0]} roads · ${p.left[1]} settlements · ${p.left[2]} cities left</div>
+      </div>
+      <div class="pvp"><b>${p.points}</b><small>${vpNote}</small></div>
+    </div>`;
+  }).join("");
+}
+
+function bars(list) {
+  return `<div class="bars">${list.map((h) => `<div><b>${fmtPct(h.p)}</b><span class="bar" style="width:${Math.max(2, h.p * 64)}px"></span><span>${esc(h.label)}</span></div>`).join("")}</div>`;
+}
+
+function drawThinking() {
+  if (V.last_agent) {
+    $("thinking").innerHTML = `<div class="sub">Its last action: <b style="color:var(--text)">${esc(V.last_agent.label)}</b>, and how likely it was to take each</div>${bars(V.last_agent.top)}`;
+  } else {
+    $("thinking").innerHTML = `<div class="sub">How likely the AI was to take its likeliest actions shows here after it acts.</div>`;
+  }
+}
+
+function drawBank() {
+  $("bank").innerHTML = V.bank.map((n, r) => `<div class="bcard" style="background:${COLOR[r]}" title="${RES[r]} in the bank">${ICON[r]}<b>${n}</b></div>`).join("")
+    + `<div class="bcard devback" title="development cards left">🂠<b>${V.deck}</b></div>`;
+}
+
+function drawLog() {
+  const log = $("log"), stick = log.scrollTop + log.clientHeight >= log.scrollHeight - 30;
+  log.innerHTML = V.log.map((e) => {
+    const who = e.who ? `<span class="who" style="color:${SEAT_COLOR[e.seat]}">${e.who === "you" ? "You" : "AI"}</span>` : "";
+    if (e.kind === "gains") {
+      const cards = e.gains.flatMap((g, r) => Array(Math.abs(g)).fill(mc(r, g < 0 ? "lose" : "")));
+      const lost = e.gains.some((g) => g < 0), got = e.gains.some((g) => g > 0);
+      return `<div>${who} ${got && !lost ? "got" : lost && !got ? "lost" : "traded"} ${cards.join("")}</div>`;
+    }
+    if (e.kind === "roll") return `<div>${who} rolled <span class="minidie ${e.roll === 7 ? "seven" : ""}">${e.roll}</span></div>`;
+    return `<div class="${e.kind}">${who} ${esc(e.text)}</div>`;
+  }).join("");
+  if (stick) log.scrollTop = log.scrollHeight;
+}
+
+function cardHTML(r, n, opts = {}) {
+  const p = opts.action !== undefined ? pct(opts.action) : null;
+  // A stack of up to four cards, so a big hand reads as a big pile.
+  const layers = [...Array(Math.min(Math.max(n - 1, 0), 3))].map((_, i) => `${(i + 1) * 3}px ${-(i + 1) * 3}px 0 -1px ${COLOR[r]}, ${(i + 1) * 3}px ${-(i + 1) * 3}px 0 1px #fbf6ea`).reverse();
+  const stack = opts.stack && layers.length ? `box-shadow:${layers.join(",")};` : "";
+  return `<button class="card ${n ? "" : "zero"} ${opts.cls || ""}" style="background:${COLOR[r]};${stack}" ${opts.attrs || ""}>
+    <span class="icon">${ICON[r]}</span><span class="lbl">${RES[r]}</span>${opts.count === false ? "" : `<span class="count">${n}</span>`}
+    ${opts.rate ? `<span class="rate">${opts.rate}</span>` : ""}${p !== null ? `<span class="pct">${fmtPct(p)}</span>` : ""}</button>`;
+}
+
+// The two dice of a sum: the game rolls sums (balanced dice), so the split is only for show.
+function splitRoll(sum, seed) {
+  const pairs = [];
+  for (let a = 1; a <= 6; a++) if (sum - a >= 1 && sum - a <= 6) pairs.push([a, sum - a]);
+  return pairs[seed % pairs.length];
+}
+const PIPS = { 1: [4], 2: [2, 6], 3: [2, 4, 6], 4: [0, 2, 6, 8], 5: [0, 2, 4, 6, 8], 6: [0, 2, 3, 5, 6, 8] };
+const dieHTML = (n, cls = "") => `<div class="die ${cls}">${[...Array(9)].map((_, i) => `<i class="${n && PIPS[n].includes(i) ? "on" : ""}"></i>`).join("")}</div>`;
+
+function drawFooter() {
+  const me = V.players[0], k = K();
+  const discarding = V.your_turn && V.phase === "discard";
+  const held = me.hand.map((n, r) => [n, r]).filter(([n]) => n);
+  $("hand").innerHTML = held.map(([n, r]) => cardHTML(r, n, discarding && legal(k[9] + r)
+    ? { cls: "playable", attrs: `data-act="${k[9] + r}" title="discard one"`, action: k[9] + r, stack: true } : { stack: true })).join("")
+    || `<div class="empty">No resource cards</div>`;
+
+  const play = { 0: k[5], 2: k[6] };
+  $("dev").innerHTML = me.cards.map((n, c) => {
+    if (!n) return "";
+    let action = play[c], can = action !== undefined && legal(action);
+    let attrs = can ? `data-act="${action}"` : "";
+    if (c === 3 && ofKind(7).length) { can = true; attrs = `data-pick="plenty"`; action = undefined; }
+    if (c === 4 && ofKind(8).length) { can = true; attrs = `data-pick="monopoly"`; action = undefined; }
+    const p = action !== undefined ? pct(action) : c === 3 && can ? sumPct(ofKind(7)) : c === 4 && can ? sumPct(ofKind(8)) : null;
+    const locked = !can && me.new_cards[c] >= n && c !== 1;
+    return `<button class="card dev ${can ? "playable" : ""} ${locked ? "locked" : ""}" ${attrs} title="${CARD_NAMES[c]}${can ? ": click to play" : locked ? ": bought this turn" : ""}">
+      <span class="icon">${CARD_ICONS[c]}</span><span class="lbl">${CARD_NAMES[c]}</span><span class="count">${n}</span>
+      ${me.new_cards[c] ? `<span class="new">${me.new_cards[c]} new</span>` : ""}${p !== null ? `<span class="pct">${fmtPct(p)}</span>` : ""}</button>`;
+  }).join("") || `<div class="empty">No development cards</div>`;
+
+  const main = V.your_turn && V.phase === "main";
+  const cost = (m) => `<span class="cost">${COST[m].map((r) => mc(r)).join("")}</span>`;
+  const pctTag = (p) => p !== null && p > 0 ? `<span class="pct">${fmtPct(p)}</span>` : "";
+  const build = (m, label, key) => {
+    const as = main ? ofMode(m) : [];
+    return `<button class="act ${mode === m ? "on" : ""}" ${as.length ? "" : "disabled"} data-mode="${m}" title="${label}: ${COST[m].map((r) => RES[r]).join(", ")}">
+      <kbd>${key}</kbd>${pieceSVG(m, SEAT_COLOR[V.you])}<span class="lbl">${label}</span>${cost(m)}${pctTag(sumPct(as))}</button>`;
+  };
+  const trades = ofKind(3);
+  const buyOk = legal(k[4]);
+  const [d1, d2] = V.last_roll ? splitRoll(V.last_roll, V.turn) : [0, 0];
+  const seven = V.last_roll === 7 ? "seven" : "";
+  const canRoll = legal(k[10]);
+  $("actions").innerHTML =
+    `<button class="act" ${trades.length ? "" : "disabled"} data-pick="trade" title="Trade with the bank"><kbd>t</kbd><span class="icon">⇄</span><span class="lbl">Trade</span>${pctTag(sumPct(trades))}</button>` +
+    `<button class="act" ${buyOk ? "" : "disabled"} data-act="${k[4]}" title="Buy a development card: wool, grain, ore"><kbd>b</kbd><span class="icon">🂠</span><span class="lbl">Dev card</span>${cost("buy")}${pctTag(pct(k[4]))}</button>` +
+    build("road", "Road", "r") + build("settlement", "Settlement", "s") + build("city", "City", "c") +
+    `<button id="dice" class="${canRoll ? "go" : ""}" ${canRoll ? `data-act="${k[10]}" title="Roll (space)"` : "disabled"}>
+      ${V.last_roll && !canRoll ? `<span class="sum">${V.last_roll}</span>` : ""}${dieHTML(canRoll ? 0 : d1, canRoll ? "" : seven || (V.last_roll ? "" : "blank"))}${dieHTML(canRoll ? 0 : d2, canRoll ? "" : seven || (V.last_roll ? "" : "blank"))}${pctTag(pct(k[10]))}</button>` +
+    `<button class="act end" ${legal(k[11]) ? "" : "disabled"} data-act="${k[11]}" title="End your turn (space)"><kbd>␣</kbd><span class="icon">⏭</span><span class="lbl">End turn</span>${pctTag(pct(k[11]))}</button>`;
+  if (canRoll) $("dice").querySelectorAll(".die").forEach((d) => (d.innerHTML = `<span style="grid-area:1/1/4/4;place-self:center;font-weight:800;font-size:13px;color:var(--ok)">ROLL</span>`));
+
+  const key = `${V.turn}:${V.turn_seat}:${V.last_roll}`;
+  if (V.last_roll && diceKey !== null && key !== diceKey && !canRoll) {
+    const d = $("dice");
+    d.classList.add("rolling");
+    setTimeout(() => d.classList.remove("rolling"), 650);
+  }
+  diceKey = key;
+}
+
+function drawTrade() {
+  const pop = $("tradePop");
+  if (pop.style.display !== "block") return;
+  const k = K(), [gives, takes] = L.trades;
+  const legalTrades = ofKind(3);
+  if (!legalTrades.length) { pop.style.display = "none"; return; }
+  const canGive = new Set(legalTrades.map((a) => gives[a - k[3]]));
+  if (tradeGive !== null && !canGive.has(tradeGive)) tradeGive = null;
+  const give = RES.map((_, r) => cardHTML(r, V.players[0].hand[r], {
+    cls: tradeGive === r ? "sel" : "", rate: `${V.rates[r]}:1`, attrs: `${canGive.has(r) ? "" : "disabled"} data-give="${r}"`,
+  })).join("");
+  const take = RES.map((_, r) => {
+    const a = legalTrades.find((t) => gives[t - k[3]] === tradeGive && takes[t - k[3]] === r);
+    return cardHTML(r, V.bank[r], { attrs: a === undefined ? "disabled" : `data-act="${a}"`, action: a });
+  }).join("");
+  pop.innerHTML = `<button class="close" data-close>×</button><h4>Trade with the bank</h4>
+    <div class="row"><span>Give</span>${give}</div><div class="row"><span>Get</span>${take}</div>
+    <div class="note">${tradeGive === null ? "Pick what to give; the badge is your rate." : `Give ${V.rates[tradeGive]} ${RES[tradeGive]} for… (counts are the bank's)`}</div>`;
+}
+
+function drawPick() {
+  const pop = $("pickPop"), kind = pop.dataset.kind;
+  if (pop.style.display !== "block") return;
+  const k = K();
+  if (kind === "monopoly") {
+    const cards = RES.map((_, r) => cardHTML(r, V.players[1].hand[r], { attrs: legal(k[8] + r) ? `data-act="${k[8] + r}"` : "disabled", action: k[8] + r })).join("");
+    pop.innerHTML = `<button class="close" data-close>×</button><h4>💰 Monopoly: take all of</h4><div class="row">${cards}</div><div class="note">Counts are the AI's.</div>`;
+  } else {
+    const [first, second] = L.plenty;
+    const pair = (a, b) => { const lo = Math.min(a, b), hi = Math.max(a, b); return k[7] + first.findIndex((f, i) => f === lo && second[i] === hi); };
+    const cards = RES.map((_, r) => {
+      const ok = plenty.length === 0 ? RES.some((_, s) => legal(pair(r, s))) : legal(pair(plenty[0], r));
+      return cardHTML(r, V.bank[r], { cls: plenty[0] === r ? "sel" : "", attrs: ok ? `data-plenty="${r}"` : "disabled", action: plenty.length ? pair(plenty[0], r) : undefined });
+    }).join("");
+    pop.innerHTML = `<button class="close" data-close>×</button><h4>🎁 Year of plenty: take two</h4><div class="row">${cards}</div>
+      <div class="note">${plenty.length ? `${RES[plenty[0]]} and… (the same again is fine)` : "Pick the first; counts are the bank's."}</div>`;
+    pop.pair = pair;
+  }
+}
+
+function drawDiscard() {
+  const pop = $("discardPop"), k = K(), me = V.players[0];
+  if (!(V.your_turn && V.phase === "discard")) { pop.style.display = "none"; return; }
+  pop.style.display = "block";
+  const cards = RES.map((_, r) => cardHTML(r, me.hand[r], { attrs: legal(k[9] + r) ? `data-act="${k[9] + r}"` : "disabled", action: k[9] + r })).join("");
+  pop.innerHTML = `<h4>A seven! Discard ${me.to_discard} more card${me.to_discard > 1 ? "s" : ""}</h4><div class="row">${cards}</div><div class="note">Click a card to discard one.</div>`;
+}
+
+function show(v) {
+  V = v;
+  if (!V.your_turn) { $("tradePop").style.display = "none"; $("pickPop").style.display = "none"; }
+  if (mode && !(V.your_turn && V.phase === "main" && ofMode(mode).length)) mode = null;
+  $("meta").textContent = `turn ${V.turn} · ${G.agent}`;
+  $("newBtn").textContent = V.over ? "Play again" : "New game";
+  const banner = $("banner");
+  banner.innerHTML = `${V.over ? "" : `<span class="dot" style="background:${SEAT_COLOR[V.your_turn ? V.you : 1 - V.you]}"></span>`}${esc(prompt())}`;
+  banner.className = V.over ? (V.result === "you" ? "win" : V.result === "agent" ? "lose" : "") : "";
+  $("hover").textContent = "";
+  drawBoard(); drawPlayers(); drawThinking(); drawBank(); drawLog(); drawFooter(); drawTrade(); drawPick(); drawDiscard();
+}
+
+function closePops() {
+  $("tradePop").style.display = $("pickPop").style.display = "none";
+  plenty = []; tradeGive = null;
+}
+
+function setMode(m) {
+  if (!V || !V.your_turn || V.phase !== "main") return;
+  if (m !== null && !ofMode(m).length) return;
+  closePops();
+  mode = mode === m ? null : m;
+  $("banner").lastChild.textContent = prompt();
+  drawBoard(); drawFooter();
+}
+
+function openPick(which) {
+  closePops();
+  mode = null;
+  if (which === "trade") {
+    if (!ofKind(3).length) return;
+    $("tradePop").style.display = "block"; drawTrade();
+  } else { $("pickPop").dataset.kind = which; $("pickPop").style.display = "block"; drawPick(); }
+  drawBoard(); drawFooter();
+}
+
+document.addEventListener("click", (e) => {
+  const b = e.target.closest("button");
+  if (!b || b.disabled) return;
+  if (b.dataset.close !== undefined) { closePops(); return; }
+  if (b.dataset.mode) { setMode(b.dataset.mode); return; }
+  if (b.dataset.act !== undefined) {
+    const p = b.closest(".pop");
+    if (p && p.id !== "discardPop") p.style.display = "none";
+    plenty = [];
+    act(+b.dataset.act);
+    return;
+  }
+  if (b.dataset.give !== undefined) { tradeGive = +b.dataset.give; drawTrade(); return; }
+  if (b.dataset.plenty !== undefined) {
+    const r = +b.dataset.plenty, pop = $("pickPop");
+    if (!plenty.length) { plenty = [r]; drawPick(); return; }
+    const a = pop.pair(plenty[0], r);
+    plenty = []; pop.style.display = "none";
+    act(a);
+    return;
+  }
+  if (b.dataset.pick) openPick(b.dataset.pick);
+});
+
+$("newBtn").onclick = newGame;
+
+document.addEventListener("keydown", (e) => {
+  if (e.target.tagName === "SELECT" || e.ctrlKey || e.metaKey || e.altKey || !V) return;
+  const k = K();
+  const keys = { r: () => setMode("road"), s: () => setMode("settlement"), c: () => setMode("city"),
+    t: () => openPick("trade"), b: () => legal(k[4]) && act(k[4]) };
+  if (keys[e.key]) keys[e.key]();
+  else if (e.key === "Escape") { closePops(); if (mode) setMode(mode); }
+  else if (e.key === " ") {
+    e.preventDefault();
+    if (legal(k[10])) act(k[10]);
+    else if (legal(k[11])) act(k[11]);
+  }
+});
+
+main();
+</script>
+</body>
+</html>
